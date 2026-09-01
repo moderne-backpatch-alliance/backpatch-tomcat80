@@ -17,6 +17,7 @@
 package org.apache.coyote.ajp;
 
 import java.nio.ByteBuffer;
+import java.util.regex.Pattern;
 
 import org.apache.coyote.AbstractProtocol;
 import org.apache.coyote.Processor;
@@ -92,6 +93,18 @@ public abstract class AbstractAjpProtocol<S> extends AbstractProtocol<S> {
     }
 
 
+    private Pattern allowedRequestAttributesPatternPattern;
+    public void setAllowedRequestAttributesPattern(String allowedRequestAttributesPattern) {
+        this.allowedRequestAttributesPatternPattern = Pattern.compile(allowedRequestAttributesPattern);
+    }
+    public String getAllowedRequestAttributesPattern() {
+        return allowedRequestAttributesPatternPattern.pattern();
+    }
+    protected Pattern getAllowedRequestAttributesPatternPattern() {
+        return allowedRequestAttributesPatternPattern;
+    }
+
+
     /**
      * AJP packet size.
      */
@@ -114,6 +127,7 @@ public abstract class AbstractAjpProtocol<S> extends AbstractProtocol<S> {
         processor.setKeepAliveTimeout(getKeepAliveTimeout());
         processor.setClientCertProvider(getClientCertProvider());
         processor.setMaxCookieCount(getMaxCookieCount());
+        processor.setAllowedRequestAttributesPatternPattern(getAllowedRequestAttributesPatternPattern());
     }
 
     protected abstract static class AbstractAjpConnectionHandler<S,P extends AbstractAjpProcessor<S>>

@@ -33,13 +33,24 @@ import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
 import org.junit.Assert;
+import org.junit.Before;
 import org.junit.Test;
 
 import org.apache.catalina.Context;
+import org.apache.catalina.connector.Connector;
 import org.apache.catalina.startup.Tomcat;
 import org.apache.catalina.startup.TomcatBaseTest;
 
 public class TestAbstractAjpProcessor extends TomcatBaseTest {
+
+    @Before
+    @Override
+    public void setUp() throws Exception {
+        super.setUp();
+
+        Connector c = getTomcatInstance().getConnector();
+        c.setProperty("allowedRequestAttributesPattern", "MYATTRIBUTE.*");
+    }
 
     @Override
     protected String getProtocol() {
@@ -548,6 +559,47 @@ public class TestAbstractAjpProcessor extends TomcatBaseTest {
 
         ajpClient.disconnect();
     }
+
+    /*
+     * CVE-2020-1938 (Ghostcat). An AJP request carrying an arbitrary named
+     * attribute had that attribute set on the request unconditionally, so a
+     * client able to reach the AJP port could send
+     * javax.servlet.include.request_uri and have the container return any file
+     * in the web application - or process it as a JSP. Upstream's remedy
+     * rejects any attribute the connector does not recognise and does not
+     * match allowedRequestAttributesPattern. Nothing upstream asserts this
+     * directly; testOneAttribute above is the matching allow-path control, and
+     * only passes because setUp configures the pattern.
+     */
+    @Test
+    public void testArbitraryRequestAttributeIsRejected() throws Exception {
+        Tomcat tomcat = getTomcatInstance();
+        tomcat.start();
+
+        // No file system docBase required
+        Context ctx = tomcat.addContext("", null);
+
+        Tomcat.addServlet(ctx, "helloWorld", new HelloWorldServlet());
+        ctx.addServletMappingDecoded("/", "helloWorld");
+
+        SimpleAjpClient ajpClient = new SimpleAjpClient();
+
+        ajpClient.setPort(getPort());
+
+        ajpClient.connect();
+        validateCpong(ajpClient.cping());
+
+        TesterAjpMessage forwardMessage = ajpClient.createForwardMessage();
+        forwardMessage.addAttribute("javax.servlet.include.request_uri", "/WEB-INF/web.xml");
+        forwardMessage.end();
+
+        TesterAjpMessage responseHeaders = ajpClient.sendMessage(forwardMessage);
+        validateResponseHeaders(responseHeaders, 403, "Forbidden");
+        validateResponseEnd(ajpClient.readMessage(), false);
+
+        ajpClient.disconnect();
+    }
+
 
     @Test
     public void testKeepAlive() throws Exception {
