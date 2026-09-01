@@ -2885,10 +2885,10 @@ skip.installer property in build.properties" />
       <param name="checksum.value" value="${cglib.checksum.value}"/>
     </antcall>
 
-    <antcall target="downloadzip">
+    <antcall target="downloadfile">
       <param name="sourcefile" value="${objenesis.loc}"/>
       <param name="destfile" value="${objenesis.jar}"/>
-      <param name="destdir" value="${base.path}"/>
+      <param name="destdir" value="${objenesis.home}"/>
       <param name="checksum.enabled" value="${objenesis.checksum.enabled}"/>
       <param name="checksum.algorithm" value="${objenesis.checksum.algorithm}"/>
       <param name="checksum.value" value="${objenesis.checksum.value}"/>
