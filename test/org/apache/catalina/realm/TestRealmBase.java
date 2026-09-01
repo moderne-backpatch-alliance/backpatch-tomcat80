@@ -17,6 +17,7 @@
 package org.apache.catalina.realm;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.security.Principal;
 import java.util.ArrayList;
 import java.util.List;
@@ -36,6 +37,8 @@ import org.apache.tomcat.unittest.TesterRequest;
 import org.apache.tomcat.unittest.TesterResponse;
 import org.apache.tomcat.util.descriptor.web.SecurityCollection;
 import org.apache.tomcat.util.descriptor.web.SecurityConstraint;
+import org.apache.tomcat.util.security.ConcurrentMessageDigest;
+import org.apache.tomcat.util.security.MD5Encoder;
 
 public class TestRealmBase {
 
@@ -43,6 +46,9 @@ public class TestRealmBase {
     private static final String USER2 = "user2";
     private static final String USER99 = "user99";
     private static final String PWD = "password";
+    private static final String DIGEST_REALM = "TestRealm";
+    private static final String DIGEST_NONCE = "e1cbb5b41a7ee8b1c1c1e4d2b5b1eb64";
+    private static final String DIGEST_URI = "/protected/index.html";
     public static final String ROLE1 = "role1";
     private static final String ROLE2 = "role2";
     private static final String ROLE3 = "role3";
@@ -870,5 +876,51 @@ public class TestRealmBase {
         request.setUserPrincipal(gp99);
         Assert.assertFalse(mapRealm.hasResourcePermission(
                 request, response, constraintsPost, null));
+    }
+
+    /*
+     * CVE-2026-43512. getDigest() folded getPassword()'s return value into the
+     * A1 string without checking it, so for a user the Realm has never heard of
+     * it hashed the literal text "null" - a value any client can compute for
+     * itself. The upstream regression test lives in TestDigestAuthenticatorB,
+     * which does not exist on this baseline, so the same behaviour is asserted
+     * here directly against RealmBase.
+     */
+    @Test
+    public void testDigestAuthenticationRejectsUnknownUser() {
+        TesterMapRealm realm = new TesterMapRealm();
+        realm.addUser(USER1, PWD);
+
+        String digestA2 = digestMd5("GET:" + DIGEST_URI);
+        String clientDigest = digestMd5(digestMd5(USER99 + ":" + DIGEST_REALM + ":null") + ":" +
+                DIGEST_NONCE + ":" + digestA2);
+
+        Assert.assertNull(realm.authenticate(USER99, clientDigest, DIGEST_NONCE, null, null, null,
+                DIGEST_REALM, digestA2));
+    }
+
+
+    @Test
+    public void testDigestAuthenticationAcceptsKnownUser() {
+        TesterMapRealm realm = new TesterMapRealm();
+        realm.addUser(USER1, PWD);
+
+        String digestA2 = digestMd5("GET:" + DIGEST_URI);
+        String clientDigest = digestMd5(digestMd5(USER1 + ":" + DIGEST_REALM + ":" + PWD) + ":" +
+                DIGEST_NONCE + ":" + digestA2);
+
+        Principal principal = realm.authenticate(USER1, clientDigest, DIGEST_NONCE, null, null, null,
+                DIGEST_REALM, digestA2);
+
+        Assert.assertNotNull(principal);
+        Assert.assertEquals(USER1, principal.getName());
+    }
+
+
+    // RealmBase hashes with ISO-8859-1 unless a digestEncoding is configured,
+    // and encodes with MD5Encoder - the 8.0 form of getDigest().
+    private static String digestMd5(String input) {
+        return MD5Encoder.encode(
+                ConcurrentMessageDigest.digestMD5(input.getBytes(StandardCharsets.ISO_8859_1)));
     }
 }
