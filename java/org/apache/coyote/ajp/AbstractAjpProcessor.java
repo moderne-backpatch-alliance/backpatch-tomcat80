@@ -92,6 +92,7 @@ public abstract class AbstractAjpProcessor<S> extends AbstractProcessor<S> {
 
 
     private static final Set<String> javaxAttributes;
+    private static final Set<String> iisTlsAttributes;
 
 
     static {
@@ -142,6 +143,18 @@ public abstract class AbstractAjpProcessor<S> extends AbstractProcessor<S> {
         s.add("javax.servlet.request.ssl_session");
         s.add("javax.servlet.request.X509Certificate");
         javaxAttributes= Collections.unmodifiableSet(s);
+
+        Set<String> iis = new HashSet<String>();
+        iis.add("CERT_ISSUER");
+        iis.add("CERT_SUBJECT");
+        iis.add("CERT_COOKIE");
+        iis.add("HTTPS_SERVER_SUBJECT");
+        iis.add("CERT_FLAGS");
+        iis.add("HTTPS_SECRETKEYSIZE");
+        iis.add("CERT_SERIALNUMBER");
+        iis.add("HTTPS_SERVER_ISSUER");
+        iis.add("HTTPS_KEYSIZE");
+        iisTlsAttributes = Collections.unmodifiableSet(iis);
     }
 
 
@@ -1324,6 +1337,9 @@ public abstract class AbstractAjpProcessor<S> extends AbstractProcessor<S> {
                 } else if (n.equals("JK_LB_ACTIVATION")) {
                     request.setAttribute(n, v);
                 } else if (javaxAttributes.contains(n)) {
+                    request.setAttribute(n, v);
+                } else if (iisTlsAttributes.contains(n)) {
+                    // Allow IIS TLS attributes
                     request.setAttribute(n, v);
                 } else {
                     // All 'known' attributes will be processed by the previous

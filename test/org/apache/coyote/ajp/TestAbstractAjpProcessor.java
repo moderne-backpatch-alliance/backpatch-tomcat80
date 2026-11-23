@@ -462,6 +462,13 @@ public class TestAbstractAjpProcessor extends TomcatBaseTest {
     }
 
     @Test
+    public void testIisTlsAttribute() throws Exception {
+        RequestDescriptor desc = new RequestDescriptor();
+        desc.putAttribute("CERT_ISSUER", "CERT_ISSUER-VALUE");
+        doSnoopTest(desc);
+    }
+
+    @Test
     public void testMulti() throws Exception {
         RequestDescriptor desc = new RequestDescriptor();
         desc.putRequestInfo("REQUEST-SERVER-NAME", "MYSERVER");
