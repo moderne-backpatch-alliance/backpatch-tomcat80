@@ -16,6 +16,8 @@
  */
 package org.apache.coyote.ajp;
 
+import java.net.InetAddress;
+
 import org.apache.coyote.AbstractProtocol;
 import org.apache.coyote.Processor;
 import org.apache.juli.logging.Log;
@@ -54,6 +56,7 @@ public class AjpNio2Protocol extends AbstractAjpProtocol<Nio2Channel> {
 
     public AjpNio2Protocol() {
         endpoint = new Nio2Endpoint();
+        endpoint.setAddress(InetAddress.getLoopbackAddress());
         cHandler = new AjpConnectionHandler(this);
         ((Nio2Endpoint) endpoint).setHandler(cHandler);
         setSoLinger(Constants.DEFAULT_CONNECTION_LINGER);

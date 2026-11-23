@@ -16,6 +16,7 @@
  */
 package org.apache.coyote.ajp;
 
+import java.net.InetAddress;
 import java.nio.channels.SocketChannel;
 import java.util.Iterator;
 
@@ -56,6 +57,7 @@ public class AjpNioProtocol extends AbstractAjpProtocol<NioChannel> {
 
     public AjpNioProtocol() {
         endpoint = new NioEndpoint();
+        endpoint.setAddress(InetAddress.getLoopbackAddress());
         cHandler = new AjpConnectionHandler(this);
         ((NioEndpoint) endpoint).setHandler(cHandler);
         setSoLinger(Constants.DEFAULT_CONNECTION_LINGER);

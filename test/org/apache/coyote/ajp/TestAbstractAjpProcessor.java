@@ -19,6 +19,7 @@ package org.apache.coyote.ajp;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.PrintWriter;
+import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -33,13 +34,27 @@ import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
 import org.junit.Assert;
+import org.junit.Before;
 import org.junit.Test;
 
 import org.apache.catalina.Context;
+import org.apache.catalina.LifecycleState;
+import org.apache.catalina.connector.Connector;
 import org.apache.catalina.startup.Tomcat;
 import org.apache.catalina.startup.TomcatBaseTest;
+import org.apache.coyote.AbstractProtocol;
 
 public class TestAbstractAjpProcessor extends TomcatBaseTest {
+
+    @Before
+    @Override
+    public void setUp() throws Exception {
+        super.setUp();
+
+        Connector c = getTomcatInstance().getConnector();
+        c.setProperty("secretRequired", "false");
+        c.setProperty("allowedRequestAttributesPattern", "MYATTRIBUTE.*");
+    }
 
     @Override
     protected String getProtocol() {
@@ -547,6 +562,57 @@ public class TestAbstractAjpProcessor extends TomcatBaseTest {
         validateResponseEnd(ajpClient.readMessage(), true);
 
         ajpClient.disconnect();
+    }
+
+    @Test
+    public void testArbitraryRequestAttributeRejected() throws Exception {
+        Tomcat tomcat = getTomcatInstance();
+        tomcat.start();
+
+        // No file system docBase required
+        Context ctx = tomcat.addContext("", null);
+
+        Tomcat.addServlet(ctx, "helloWorld", new HelloWorldServlet());
+        ctx.addServletMappingDecoded("/", "helloWorld");
+
+        SimpleAjpClient ajpClient = new SimpleAjpClient();
+
+        ajpClient.setPort(getPort());
+
+        ajpClient.connect();
+        validateCpong(ajpClient.cping());
+
+        TesterAjpMessage forwardMessage = ajpClient.createForwardMessage();
+        forwardMessage.addAttribute("NOTMYATTRIBUTE", "value");
+        forwardMessage.end();
+
+        TesterAjpMessage responseHeaders = ajpClient.sendMessage(forwardMessage);
+        validateResponseHeaders(responseHeaders, 403, "Forbidden");
+        validateResponseEnd(ajpClient.readMessage(), false);
+
+        ajpClient.disconnect();
+    }
+
+    @Test
+    public void testSecretRequiredWithoutSecret() throws Exception {
+        Tomcat tomcat = getTomcatInstance();
+        tomcat.getConnector().setProperty("secretRequired", "true");
+        try {
+            tomcat.start();
+        } catch (Exception e) {
+            // Depending on how the failure propagates, start() may throw
+        }
+        Assert.assertEquals(LifecycleState.FAILED,
+                tomcat.getConnector().getState());
+    }
+
+    @Test
+    public void testDefaultAddressIsLoopback() throws Exception {
+        AbstractProtocol<?> protocol = (AbstractProtocol<?>)
+                Class.forName(getProtocol()).newInstance();
+        InetAddress address = protocol.getAddress();
+        Assert.assertNotNull(address);
+        Assert.assertTrue(address.isLoopbackAddress());
     }
 
     @Test

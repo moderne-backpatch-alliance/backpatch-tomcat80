@@ -16,6 +16,8 @@
  */
 package org.apache.coyote.ajp;
 
+import java.net.InetAddress;
+
 import org.apache.coyote.AbstractProtocol;
 import org.apache.coyote.Processor;
 import org.apache.juli.logging.Log;
@@ -61,6 +63,7 @@ public class AjpAprProtocol extends AbstractAjpProtocol<Long> {
 
     public AjpAprProtocol() {
         endpoint = new AprEndpoint();
+        endpoint.setAddress(InetAddress.getLoopbackAddress());
         cHandler = new AjpConnectionHandler(this);
         ((AprEndpoint) endpoint).setHandler(cHandler);
         setSoLinger(Constants.DEFAULT_CONNECTION_LINGER);
