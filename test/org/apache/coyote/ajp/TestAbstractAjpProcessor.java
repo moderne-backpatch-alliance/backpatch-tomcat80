@@ -623,6 +623,38 @@ public class TestAbstractAjpProcessor extends TomcatBaseTest {
     }
 
     @Test
+    public void testZeroLengthSecretIgnored() throws Exception {
+        Tomcat tomcat = getTomcatInstance();
+        Assert.assertTrue(tomcat.getConnector().setProperty("secret", ""));
+        tomcat.start();
+
+        // No file system docBase required
+        Context ctx = tomcat.addContext("", null);
+
+        Tomcat.addServlet(ctx, "helloWorld", new HelloWorldServlet());
+        ctx.addServletMappingDecoded("/", "helloWorld");
+
+        SimpleAjpClient ajpClient = new SimpleAjpClient();
+
+        ajpClient.setPort(getPort());
+
+        ajpClient.connect();
+        validateCpong(ajpClient.cping());
+
+        TesterAjpMessage forwardMessage = ajpClient.createForwardMessage();
+        forwardMessage.end();
+
+        TesterAjpMessage responseHeaders = ajpClient.sendMessage(forwardMessage);
+        // Expect 3 packets: headers, body, end
+        validateResponseHeaders(responseHeaders, 200, "OK");
+        TesterAjpMessage responseBody = ajpClient.readMessage();
+        validateResponseBody(responseBody, HelloWorldServlet.RESPONSE_TEXT);
+        validateResponseEnd(ajpClient.readMessage(), true);
+
+        ajpClient.disconnect();
+    }
+
+    @Test
     public void testKeepAlive() throws Exception {
         Tomcat tomcat = getTomcatInstance();
         tomcat.getConnector().setProperty("connectionTimeout", "-1");
