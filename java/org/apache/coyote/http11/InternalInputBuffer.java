@@ -305,15 +305,7 @@ public class InternalInputBuffer extends AbstractInputBuffer<Socket> {
      * HTTP header parsing is done
      */
     @SuppressWarnings("null") // headerValue cannot be null
-    private boolean parseHeader()
-        throws IOException {
-
-        //
-        // Check for blank line
-        //
-
-        byte chr = 0;
-        byte prevChr = 0;
+    private boolean parseHeader() throws IOException {
 
         while (true) {
 
@@ -467,14 +459,14 @@ public class InternalInputBuffer extends AbstractInputBuffer<Socket> {
                     throw new EOFException(sm.getString("iib.eof.error"));
             }
 
-            chr = buf[pos];
-            if ((chr != Constants.SP) && (chr != Constants.HT)) {
+            byte peek = buf[pos];
+            if (peek != Constants.SP && peek != Constants.HT) {
                 validLine = false;
             } else {
                 eol = false;
                 // Copying one extra space in the buffer (since there must
                 // be at least one space inserted between the lines)
-                buf[realPos] = chr;
+                buf[realPos] = peek;
                 realPos++;
             }
 
@@ -512,9 +504,6 @@ public class InternalInputBuffer extends AbstractInputBuffer<Socket> {
         if (pos - 1 > start) {
             lastRealByte = pos - 1;
         }
-
-        byte chr = 0;
-        byte prevChr = 0;
 
         while (!eol) {
 

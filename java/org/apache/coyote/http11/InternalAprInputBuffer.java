@@ -346,15 +346,7 @@ public class InternalAprInputBuffer extends AbstractInputBuffer<Long> {
      * HTTP header parsing is done
      */
     @SuppressWarnings("null") // headerValue cannot be null
-    private boolean parseHeader()
-        throws IOException {
-
-        //
-        // Check for blank line
-        //
-
-        byte chr = 0;
-        byte prevChr = 0;
+    private boolean parseHeader() throws IOException {
 
         while (true) {
 
@@ -370,7 +362,7 @@ public class InternalAprInputBuffer extends AbstractInputBuffer<Long> {
             if (chr == Constants.CR && prevChr != Constants.CR) {
                 // Possible start of CRLF - process the next byte.
             } else if (prevChr == Constants.CR && chr == Constants.LF) {
-                    pos++;
+                pos++;
                 return false;
             } else {
                 if (prevChr == Constants.CR) {
@@ -507,14 +499,14 @@ public class InternalAprInputBuffer extends AbstractInputBuffer<Long> {
                     throw new EOFException(sm.getString("iib.eof.error"));
             }
 
-            chr = buf[pos];
-            if ((chr != Constants.SP) && (chr != Constants.HT)) {
+            byte peek = buf[pos];
+            if (peek != Constants.SP && peek != Constants.HT) {
                 validLine = false;
             } else {
                 eol = false;
                 // Copying one extra space in the buffer (since there must
                 // be at least one space inserted between the lines)
-                buf[realPos] = chr;
+                buf[realPos] = peek;
                 realPos++;
             }
 
@@ -534,9 +526,6 @@ public class InternalAprInputBuffer extends AbstractInputBuffer<Long> {
         if (pos - 1 > start) {
             lastRealByte = pos - 1;
         }
-
-        byte chr = 0;
-        byte prevChr = 0;
 
         while (!eol) {
 
