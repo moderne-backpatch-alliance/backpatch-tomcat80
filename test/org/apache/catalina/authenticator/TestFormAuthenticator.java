@@ -30,6 +30,7 @@ import org.junit.Assert;
 import org.junit.Test;
 
 import org.apache.catalina.Context;
+import org.apache.catalina.Session;
 import org.apache.catalina.Valve;
 import org.apache.catalina.startup.SimpleHttpClient;
 import org.apache.catalina.startup.TesterMapRealm;
@@ -288,6 +289,54 @@ public class TestFormAuthenticator extends TomcatBaseTest {
 
         Assert.assertTrue(!originalSessionId.equals(newSessionId));
         client.reset();
+    }
+
+
+    /*
+     * CVE-2019-17563: with cache=false the authenticated Principal must never
+     * be kept in the session, including between the login POST and the
+     * redirect to the original request.
+     */
+    @Test
+    public void testNoPrincipalNoteInSessionWithCacheDisabled()
+            throws Exception {
+
+        FormAuthClientNoCache client = new FormAuthClientNoCache();
+
+        // First request for protected resource gets the login page
+        client.doResourceRequest("GET", true, "/test?" +
+                SelectedMethodsServlet.PARAM + "=" +
+                SelectedMethodsServlet.VALUE, null);
+        Assert.assertTrue(client.getResponseLine(), client.isResponse200());
+        Assert.assertTrue(client.isResponseBodyOK());
+        client.reset();
+
+        // Second request replies to the login challenge
+        client.doResourceRequest("POST", true, "/test/j_security_check",
+                FormAuthClientBase.LOGIN_REPLY);
+        Assert.assertTrue("login failed " + client.getResponseLine(),
+                client.isResponse303());
+        String redirectUri = client.getRedirectUri();
+        assertNoPrincipalNote(client);
+        client.reset();
+
+        // Third request follows the redirect to the protected resource
+        client.doResourceRequest("GET", true, redirectUri, null);
+        Assert.assertTrue(client.getResponseLine(), client.isResponse200());
+        Assert.assertTrue(client.isResponseBodyOK());
+        assertNoPrincipalNote(client);
+        client.reset();
+    }
+
+
+    @SuppressWarnings("deprecation")
+    private void assertNoPrincipalNote(FormAuthClientNoCache client)
+            throws Exception {
+        Session session =
+                client.ctx.getManager().findSession(client.getSessionId());
+        Assert.assertNotNull(session);
+        Assert.assertNull(session.getNote(Constants.FORM_PRINCIPAL_NOTE));
+        Assert.assertNull(session.getPrincipal());
     }
 
 
@@ -754,6 +803,60 @@ public class TestFormAuthenticator extends TomcatBaseTest {
             if (isResponse303()) {
                 return true;
             }
+            Assert.assertTrue(getResponseBody(), getResponseBody().contains("OK"));
+            Assert.assertFalse(getResponseBody().contains("FAIL"));
+            return true;
+        }
+    }
+
+
+    private class FormAuthClientNoCache extends FormAuthClientBase {
+
+        private final Context ctx;
+
+        private FormAuthClientNoCache() throws Exception {
+
+            this.clientShouldUseHttp11 = true;
+
+            Tomcat tomcat = getTomcatInstance();
+
+            ctx = tomcat.addContext("", System.getProperty("java.io.tmpdir"));
+            Tomcat.addServlet(ctx, "SelectedMethods",
+                    new SelectedMethodsServlet());
+            ctx.addServletMappingDecoded("/test", "SelectedMethods");
+            Tomcat.addServlet(ctx, "Login", new TesterServlet());
+            ctx.addServletMappingDecoded("/login", "Login");
+
+            SecurityConstraint constraint = new SecurityConstraint();
+            SecurityCollection collection = new SecurityCollection();
+            collection.setName("Protect all");
+            collection.addPatternDecoded("/test");
+            constraint.addCollection(collection);
+            constraint.addAuthRole("tomcat");
+            ctx.addConstraint(constraint);
+
+            LoginConfig lc = new LoginConfig();
+            lc.setAuthMethod("FORM");
+            lc.setLoginPage("/login");
+            ctx.setLoginConfig(lc);
+            FormAuthenticator authenticator = new FormAuthenticator();
+            authenticator.setCache(false);
+            ctx.getPipeline().addValve(authenticator);
+
+            setUseCookies(true);
+
+            TesterMapRealm realm = new TesterMapRealm();
+            realm.addUser("tomcat", "tomcat");
+            realm.addUserRole("tomcat", "tomcat");
+            ctx.setRealm(realm);
+
+            tomcat.start();
+
+            setPort(getPort());
+        }
+
+        @Override
+        public boolean isResponseBodyOK() {
             Assert.assertTrue(getResponseBody(), getResponseBody().contains("OK"));
             Assert.assertFalse(getResponseBody().contains("FAIL"));
             return true;
