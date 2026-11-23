@@ -21,6 +21,7 @@ import java.nio.charset.StandardCharsets;
 
 import org.apache.coyote.Request;
 import org.apache.tomcat.util.buf.MessageBytes;
+import org.apache.tomcat.util.http.HeaderUtil;
 import org.apache.tomcat.util.http.parser.HttpParser;
 
 public abstract class AbstractNioInputBuffer<S> extends AbstractInputBuffer<S> {
@@ -77,13 +78,13 @@ public abstract class AbstractNioInputBuffer<S> extends AbstractInputBuffer<S> {
      * Alternate constructor.
      */
     public AbstractNioInputBuffer(Request request, int headerBufferSize,
-            boolean rejectIllegalHeaderName, HttpParser httpParser) {
+            boolean rejectIllegalHeader, HttpParser httpParser) {
 
         this.request = request;
         headers = request.getMimeHeaders();
 
         this.headerBufferSize = headerBufferSize;
-        this.rejectIllegalHeaderName = rejectIllegalHeaderName;
+        this.rejectIllegalHeaderName = rejectIllegalHeader;
         this.httpParser = httpParser;
 
         filterLibrary = new InputFilter[0];
@@ -428,6 +429,8 @@ public abstract class AbstractNioInputBuffer<S> extends AbstractInputBuffer<S> {
         //
 
         byte chr = 0;
+        byte prevChr = 0;
+
         while (headerParsePos == HeaderParsePosition.HEADER_START) {
 
             // Read new bytes if needed
@@ -438,24 +441,29 @@ public abstract class AbstractNioInputBuffer<S> extends AbstractInputBuffer<S> {
                 }
             }
 
+            prevChr = chr;
             chr = buf[pos];
 
-            if (chr == Constants.CR) {
-                // Skip
-            } else if (chr == Constants.LF) {
+            if (chr == Constants.CR && prevChr != Constants.CR) {
+                // Possible start of CRLF - process the next byte.
+            } else if (prevChr == Constants.CR && chr == Constants.LF) {
                 pos++;
                 return HeaderParseStatus.DONE;
             } else {
+                if (prevChr == Constants.CR) {
+                    // Must have read two bytes (first was CR, second was not LF)
+                    pos--;
+                }
                 break;
             }
 
             pos++;
-
         }
 
         if ( headerParsePos == HeaderParsePosition.HEADER_START ) {
             // Mark the current buffer position
             headerData.start = pos;
+            headerData.lineStart = headerData.start;
             headerParsePos = HeaderParsePosition.HEADER_NAME;
         }
 
@@ -545,11 +553,22 @@ public abstract class AbstractNioInputBuffer<S> extends AbstractInputBuffer<S> {
                         }
                     }
 
+                    prevChr = chr;
                     chr = buf[pos];
                     if (chr == Constants.CR) {
-                        // Skip
-                    } else if (chr == Constants.LF) {
+                        // Possible start of CRLF - process the next byte.
+                    } else if (prevChr == Constants.CR && chr == Constants.LF) {
                         eol = true;
+                    } else if (prevChr == Constants.CR) {
+                        // Invalid value
+                        // Delete the header (it will be the most recent one)
+                        headers.removeHeader(headers.size() - 1);
+                        return skipLine();
+                    } else if (chr != Constants.HT && HttpParser.isControl(chr)) {
+                        // Invalid value
+                        // Delete the header (it will be the most recent one)
+                        headers.removeHeader(headers.size() - 1);
+                        return skipLine();
                     } else if (chr == Constants.SP || chr == Constants.HT) {
                         buf[headerData.realPos] = chr;
                         headerData.realPos++;
@@ -606,6 +625,9 @@ public abstract class AbstractNioInputBuffer<S> extends AbstractInputBuffer<S> {
         headerParsePos = HeaderParsePosition.HEADER_SKIPLINE;
         boolean eol = false;
 
+        byte chr = 0;
+        byte prevChr = 0;
+
         // Reading bytes until the end of the line
         while (!eol) {
 
@@ -616,9 +638,12 @@ public abstract class AbstractNioInputBuffer<S> extends AbstractInputBuffer<S> {
                 }
             }
 
-            if (buf[pos] == Constants.CR) {
+            prevChr = chr;
+            chr = buf[pos];
+
+            if (chr == Constants.CR) {
                 // Skip
-            } else if (buf[pos] == Constants.LF) {
+            } else if (prevChr == Constants.CR && chr == Constants.LF) {
                 eol = true;
             } else {
                 headerData.lastSignificantChar = pos;
@@ -627,9 +652,8 @@ public abstract class AbstractNioInputBuffer<S> extends AbstractInputBuffer<S> {
             pos++;
         }
         if (rejectIllegalHeaderName || getLog().isDebugEnabled()) {
-            String message = sm.getString("iib.invalidheader", new String(buf, headerData.start,
-                    headerData.lastSignificantChar - headerData.start + 1,
-                    StandardCharsets.ISO_8859_1));
+            String message = sm.getString("iib.invalidheader", HeaderUtil.toPrintableString(
+                    buf, headerData.lineStart, headerData.lastSignificantChar - headerData.lineStart + 1));
             if (rejectIllegalHeaderName) {
                 throw new IllegalArgumentException(message);
             }
@@ -642,6 +666,10 @@ public abstract class AbstractNioInputBuffer<S> extends AbstractInputBuffer<S> {
 
     private final HeaderParseData headerData = new HeaderParseData();
     public static class HeaderParseData {
+        /**
+         * The first character of the header line.
+         */
+        int lineStart = 0;
         /**
          * When parsing header name: first character of the header.<br>
          * When skipping broken header line: first character of the header.<br>
@@ -670,6 +698,7 @@ public abstract class AbstractNioInputBuffer<S> extends AbstractInputBuffer<S> {
          */
         MessageBytes headerValue = null;
         public void recycle() {
+            lineStart = 0;
             start = 0;
             realPos = 0;
             lastSignificantChar = 0;

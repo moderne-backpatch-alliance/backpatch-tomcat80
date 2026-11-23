@@ -20,7 +20,6 @@ import java.io.EOFException;
 import java.io.IOException;
 import java.net.SocketTimeoutException;
 import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantReadWriteLock.WriteLock;
 
@@ -32,6 +31,7 @@ import org.apache.tomcat.jni.Socket;
 import org.apache.tomcat.jni.Status;
 import org.apache.tomcat.util.buf.ByteChunk;
 import org.apache.tomcat.util.buf.MessageBytes;
+import org.apache.tomcat.util.http.HeaderUtil;
 import org.apache.tomcat.util.http.parser.HttpParser;
 import org.apache.tomcat.util.net.AbstractEndpoint;
 import org.apache.tomcat.util.net.SocketWrapper;
@@ -54,7 +54,7 @@ public class InternalAprInputBuffer extends AbstractInputBuffer<Long> {
      * Alternate constructor.
      */
     public InternalAprInputBuffer(Request request, int headerBufferSize,
-            boolean rejectIllegalHeaderName, HttpParser httpParser) {
+            boolean rejectIllegalHeader, HttpParser httpParser) {
 
         this.request = request;
         headers = request.getMimeHeaders();
@@ -66,7 +66,7 @@ public class InternalAprInputBuffer extends AbstractInputBuffer<Long> {
             bbuf = ByteBuffer.allocateDirect((headerBufferSize / 1500 + 1) * 1500);
         }
 
-        this.rejectIllegalHeaderName = rejectIllegalHeaderName;
+        this.rejectIllegalHeaderName = rejectIllegalHeader;
         this.httpParser = httpParser;
 
         inputStreamInputBuffer = new SocketInputBuffer();
@@ -354,6 +354,8 @@ public class InternalAprInputBuffer extends AbstractInputBuffer<Long> {
         //
 
         byte chr = 0;
+        byte prevChr = 0;
+
         while (true) {
 
             // Read new bytes if needed
@@ -362,23 +364,28 @@ public class InternalAprInputBuffer extends AbstractInputBuffer<Long> {
                     throw new EOFException(sm.getString("iib.eof.error"));
             }
 
+            prevChr = chr;
             chr = buf[pos];
 
-            if (chr == Constants.CR) {
-                // Skip
-            } else if (chr == Constants.LF) {
-                pos++;
+            if (chr == Constants.CR && prevChr != Constants.CR) {
+                // Possible start of CRLF - process the next byte.
+            } else if (prevChr == Constants.CR && chr == Constants.LF) {
+                    pos++;
                 return false;
             } else {
+                if (prevChr == Constants.CR) {
+                    // Must have read two bytes (first was CR, second was not LF)
+                    pos--;
+                }
                 break;
             }
 
             pos++;
-
         }
 
         // Mark the current buffer position
         int start = pos;
+        int lineStart = start;
 
         //
         // Reading the header name
@@ -403,7 +410,7 @@ public class InternalAprInputBuffer extends AbstractInputBuffer<Long> {
                 // Non-token characters are illegal in header names
                 // Parsing continues so the error can be reported in context
                 // skipLine() will handle the error
-                skipLine(start);
+                skipLine(lineStart, start);
                 return true;
             }
             chr = buf[pos];
@@ -458,10 +465,24 @@ public class InternalAprInputBuffer extends AbstractInputBuffer<Long> {
                         throw new EOFException(sm.getString("iib.eof.error"));
                 }
 
-                if (buf[pos] == Constants.CR) {
-                    // Skip
-                } else if (buf[pos] == Constants.LF) {
+                prevChr = chr;
+                chr = buf[pos];
+                if (chr == Constants.CR) {
+                    // Possible start of CRLF - process the next byte.
+                } else if (prevChr == Constants.CR && chr == Constants.LF) {
                     eol = true;
+                } else if (prevChr == Constants.CR) {
+                    // Invalid value
+                    // Delete the header (it will be the most recent one)
+                    headers.removeHeader(headers.size() - 1);
+                    skipLine(lineStart, start);
+                    return true;
+                } else if (chr != Constants.HT && HttpParser.isControl(chr)) {
+                    // Invalid value
+                    // Delete the header (it will be the most recent one)
+                    headers.removeHeader(headers.size() - 1);
+                    skipLine(lineStart, start);
+                    return true;
                 } else if (buf[pos] == Constants.SP) {
                     buf[realPos] = buf[pos];
                     realPos++;
@@ -507,12 +528,15 @@ public class InternalAprInputBuffer extends AbstractInputBuffer<Long> {
     }
 
 
-    private void skipLine(int start) throws IOException {
+    private void skipLine(int lineStart, int start) throws IOException {
         boolean eol = false;
         int lastRealByte = start;
         if (pos - 1 > start) {
             lastRealByte = pos - 1;
         }
+
+        byte chr = 0;
+        byte prevChr = 0;
 
         while (!eol) {
 
@@ -522,9 +546,12 @@ public class InternalAprInputBuffer extends AbstractInputBuffer<Long> {
                     throw new EOFException(sm.getString("iib.eof.error"));
             }
 
-            if (buf[pos] == Constants.CR) {
+            prevChr = chr;
+            chr = buf[pos];
+
+            if (chr == Constants.CR) {
                 // Skip
-            } else if (buf[pos] == Constants.LF) {
+            } else if (prevChr == Constants.CR && chr == Constants.LF) {
                 eol = true;
             } else {
                 lastRealByte = pos;
@@ -533,8 +560,8 @@ public class InternalAprInputBuffer extends AbstractInputBuffer<Long> {
         }
 
         if (rejectIllegalHeaderName || log.isDebugEnabled()) {
-            String message = sm.getString("iib.invalidheader", new String(buf, start,
-                    lastRealByte - start + 1, StandardCharsets.ISO_8859_1));
+            String message = sm.getString("iib.invalidheader", HeaderUtil.toPrintableString(
+                    buf, lineStart, lastRealByte - lineStart + 1));
             if (rejectIllegalHeaderName) {
                 throw new IllegalArgumentException(message);
             }
